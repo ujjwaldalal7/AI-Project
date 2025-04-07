@@ -1,59 +1,78 @@
-import mediapipe
 import cv2
 import numpy as np
-import time as time
-mp_drawing = mediapipe.solutions.drawing_utils
-mp_hands = mediapipe.solutions.hands
-mp_drawing_styles = mediapipe.solutions.drawing_styles
+import mediapipe as mp
+from tensorflow.keras.models import load_model
 
-def main():
-    cap = cv2.VideoCapture(0)
-    hands = mp_hands.Hands(
-        static_image_mode=False,
-        max_num_hands=2,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    )
+# Load your trained model
+model = load_model("sign_language_model_CNN.h5")
+# Define labels corresponding to letters A-Z
+labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# Initialize webcam
+cap = cv2.VideoCapture(0)
+# Initialize Mediapipe hand detection
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands()
+while True:
+    # Capture frame-by-frame
+    ret, frame = cap.read()
+    # Convert the frame to RGB
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    # Detect hands using Mediapipe
+    results = hands.process(rgb_frame)
 
-    prev_time = 0  # <-- Initialize here
-
-    while cap.isOpened():
-        ret, image = cap.read()
-        if not ret:
-            print("Ignoring empty camera frame.")
-            continue
-
-        image = cv2.flip(image, 1)
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-        results = hands.process(image_rgb)
-
-        if results.multi_hand_landmarks:
-            for hand_landmarks in results.multi_hand_landmarks:
-                mp_drawing.draw_landmarks(
-                    image,
-                    hand_landmarks,
-                    mp_hands.HAND_CONNECTIONS,
-                    mp_drawing_styles.get_default_hand_landmarks_style(),
-                    mp_drawing_styles.get_default_hand_connections_style(),
+    if results.multi_hand_landmarks:
+        # Get the bounding box of the hand
+        for landmarks in results.multi_hand_landmarks:
+            mp_drawing = mp.solutions.drawing_utils
+            mp_drawing.draw_landmarks(frame, landmarks, mp_hands.HAND_CONNECTIONS)
+            x_min, x_max, y_min, y_max = 1000, 0, 1000, 0
+            for landmark in landmarks.landmark:
+                x, y = int(landmark.x * frame.shape[1]), int(
+                    landmark.y * frame.shape[0]
                 )
+                if x < x_min:
+                    x_min = x
+                if x > x_max:
+                    x_max = x
+                if y < y_min:
+                    y_min = y
+                if y > y_max:
+                    y_max = y
+            # Extract hand region
+            hand_frame = frame[y_min:y_max, x_min:x_max]
 
-      
-        curr_time = time.time()
-        fps = 1 / (curr_time - prev_time) if prev_time != 0 else 0
-        prev_time = curr_time
+            if hand_frame.shape[0] > 0 and hand_frame.shape[1] > 0:
+                # Preprocess the hand frame
+                resized_hand_frame = cv2.resize(hand_frame, (28, 28))
+                grayscale_hand_frame = cv2.cvtColor(
+                    resized_hand_frame, cv2.COLOR_BGR2GRAY
+                )
+                normalized_hand_frame = grayscale_hand_frame / 255.0
+                # Make a prediction
+                input_frame = normalized_hand_frame.reshape(
+                    1, 28, 28, 1
+                )  # Reshape for a single image
 
-        cv2.putText(image, f'FPS: {int(fps)}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                    1, (255, 0, 0), 2)
-
-        cv2.imshow("Hand Tracking", image)
-
-        if cv2.waitKey(5) & 0xFF == 27:
-            break
-
-    hands.close()
-    cap.release()
-    cv2.destroyAllWindows()
-
-
-main()
+                prediction = model.predict(input_frame)
+                predicted_label = np.argmax(prediction)
+                # Get the corresponding letter
+                letter = labels[predicted_label]
+                # Display the prediction on the hand frame
+                cv2.putText(
+                    hand_frame,
+                    letter,
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 0),
+                    2,
+                )
+                # Display both frames in separate windows
+                cv2.imshow("Original Frame", frame)
+                # cv2.imshow('Hand Frame', hand_frame)
+    # Exit when 'q' is pressed
+    if cv2.waitKey(1) & 0xFF == ord("q"):
+        break
+# Release the webcam and close all windows
+cap.release()
+cv2.destroyAllWindows()
