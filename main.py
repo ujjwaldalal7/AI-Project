@@ -35,6 +35,8 @@ while True:
 
     ret, frame = cap.read()
 
+    # frame = cv2.resize(frame, (1024, 768))
+
     H, W, _ = frame.shape
 
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
